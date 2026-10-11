@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Code Review Workflow 可视化</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", -apple-system, sans-serif; background: #f5f7fa; color: #2c3e50; padding: 20px; }
+  h1 { font-size: 22px; margin-bottom: 16px; }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  /* 启动区 */
+  .start-panel { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .start-panel textarea { width: 100%; height: 80px; padding: 8px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; resize: vertical; }
+  .start-panel button { margin-top: 8px; background: #409eff; color: #fff; border: none; padding: 8px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  .start-panel button:disabled { background: #a0cfff; cursor: not-allowed; }
+
+  /* 流程图 */
+  .flowchart { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .node { min-width: 130px; padding: 14px 18px; border-radius: 8px; text-align: center; border: 2px solid #dcdfe6; background: #fafafa; transition: all .3s; }
+  .node .title { font-weight: bold; font-size: 14px; }
+  .node .sub { font-size: 11px; color: #909399; margin-top: 4px; }
+  .node.active { border-color: #409eff; background: #ecf5ff; box-shadow: 0 0 12px rgba(64,158,255,.3); }
+  .node.done { border-color: #67c23a; background: #f0f9eb; }
+  .node.failed { border-color: #f56c6c; background: #fef0f0; }
+  .arrow { font-size: 22px; color: #909399; margin: 0 8px; flex-shrink: 0; }
+  .decision { min-width: 110px; padding: 10px 14px; border-radius: 8px; text-align: center; border: 2px dashed #e6a23c; background: #fdf6ec; font-size: 12px; }
+  .loopback { text-align: center; font-size: 11px; color: #e6a23c; margin-top: 6px; }
+
+  /* 主区两栏 */
+  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+  .panel { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .panel h2 { font-size: 15px; margin-bottom: 10px; color: #303133; border-left: 4px solid #409eff; padding-left: 8px; }
+  .log-box { height: 360px; overflow-y: auto; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.6; }
+  .log-box .t { color: #6a9955; }
+  .log-box .a { color: #569cd6; font-weight: bold; }
+  .log-box .p { color: #ce9178; }
+  .log-box .m { color: #d4d4d4; }
+
+  .code-box { background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow-y: auto; }
+
+  .issue-list { max-height: 200px; overflow-y: auto; }
+  .issue { padding: 8px; margin-bottom: 6px; border-radius: 4px; font-size: 12px; border-left: 3px solid; }
+  .issue.严重 { background: #fef0f0; border-color: #f56c6c; }
+  .issue.中等 { background: #fdf6ec; border-color: #e6a23c; }
+  .issue.轻微 { background: #f4f4f5; border-color: #909399; }
+  .issue .loc { font-weight: bold; }
+  .issue .desc { color: #606266; margin-top: 2px; }
+
+  .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; background: #e4e7ed; color: #606266; margin-left: 10px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Code Review Multi-Agent Workflow <span class="status-badge" id="badge">待开始</span></h1>
+
+  <div class="start-panel">
+    <textarea id="req" placeholder="输入需求，例如：写一个 Python 函数，接收一个列表，返回其中所有偶数的平均值。要求处理空列表和非数字元素。"></textarea>
+    <button id="btn" onclick="start()">开始执行</button>
+  </div>
+
+  <!-- 流程图 -->
+  <div class="flowchart">
+    <div class="node" id="node-coder">
+      <div class="title">💻 编码 Agent</div>
+      <div class="sub">根据需求写代码</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="node-reviewer">
+      <div class="title">🔍 审查 Agent</div>
+      <div class="sub">找出问题</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="decision" id="node-decision">有问题？</div>
+    <div class="arrow">→</div>
+    <div class="node" id="node-fixer">
+      <div class="title">🔧 修复 Agent</div>
+      <div class="sub">修复问题</div>
+      <div class="loopback">↺ 回到审查</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="node-done">
+      <div class="title">✅ 完成</div>
+      <div class="sub">最终代码</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <h2>执行日志</h2>
+      <div class="log-box" id="logs"></div>
+    </div>
+    <div class="panel">
+      <h2>审查发现的问题（第 <span id="iter">0</span> / <span id="maxiter">3</span> 轮）</h2>
+      <div class="issue-list" id="issues"><div style="color:#909399;font-size:12px;">暂无</div></div>
+    </div>
+    <div class="panel" style="grid-column: 1 / -1;">
+      <h2>当前代码</h2>
+      <div class="code-box" id="code">// 等待执行…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STATUS_MAP = {
+  pending:    { coder:'',       reviewer:'',       fixer:'',       done:''       },
+  coder:      { coder:'active', reviewer:'',       fixer:'',       done:''       },
+  reviewer:   { coder:'done',   reviewer:'active', fixer:'',       done:''       },
+  fixer:      { coder:'done',   reviewer:'done',   fixer:'active', done:''       },
+  done:       { coder:'done',   reviewer:'done',   fixer:'done',   done:'active' },
+  failed:     { coder:'failed', reviewer:'failed', fixer:'failed', done:'failed' },
+};
+
+async function start() {
+  const req = document.getElementById('req').value.trim();
+  if (!req) { alert('请输入需求'); return; }
+  document.getElementById('btn').disabled = true;
+  const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({requirements: req})});
+  const j = await r.json();
+  if (!j.ok) alert(j.msg);
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+
+    // 状态徽章
+    document.getElementById('badge').textContent = s.status_label || s.status;
+    document.getElementById('badge').style.background =
+      s.status==='done' ? '#f0f9eb' : s.status==='failed' ? '#fef0f0' : '#ecf5ff';
+
+    // 节点高亮
+    const m = STATUS_MAP[s.status] || {};
+    for (const [node, cls] of Object.entries(m)) {
+      const el = document.getElementById('node-' + node);
+      el.className = 'node ' + cls;
+    }
+
+    // 日志
+    const logsBox = document.getElementById('logs');
+    logsBox.innerHTML = s.logs.map(l =>
+      `<div><span class="t">[${l.timestamp}]</span> <span class="a">[${l.agent}]</span> <span class="p">${l.phase}</span> <span class="m">${escapeHtml(l.message)}</span></div>`
+    ).join('');
+    logsBox.scrollTop = logsBox.scrollHeight;
+
+    // 问题
+    document.getElementById('iter').textContent = s.iteration;
+    document.getElementById('maxiter').textContent = s.max_iterations;
+    const issuesBox = document.getElementById('issues');
+    if (s.issues && s.issues.length) {
+      issuesBox.innerHTML = s.issues.map(i =>
+        `<div class="issue ${i.severity}"><div class="loc">[${i.severity}] ${escapeHtml(i.location)}</div><div class="desc">${escapeHtml(i.description)}</div><div class="desc" style="color:#409eff">建议：${escapeHtml(i.suggestion||'')}</div></div>`
+      ).join('');
+    } else if (s.status !== 'pending') {
+      issuesBox.innerHTML = '<div style="color:#67c23a;font-size:12px;">✅ 审查通过，无问题</div>';
+    }
+
+    // 代码
+    document.getElementById('code').textContent = s.final_code || s.current_code || '// 等待执行…';
+
+    if (s.status === 'done' || s.status === 'failed') {
+      document.getElementById('btn').disabled = false;
+    }
+  } catch(e) { console.error(e); }
+}
+
+function escapeHtml(t) {
+  return (t||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
